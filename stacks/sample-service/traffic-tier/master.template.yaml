@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Traffic engineering interface tier
+
+Parameters:
+
+
+  ApiTierSecretName:
+    Type: String
+    Description: SecretManager secret name for Api tier
+
+Resources:
+
+  SimpleApi:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: api-tier.template.yaml
+      Parameters:
+        TableName: !Sub '{{resolve:secretsmanager:${DataTierSecretName}:SecretString:TableName}}'
+
+  OutputSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: !Ref AWS::StackName
+      Name: !Ref ApiTierSecretName
+      Tags:
+        - Key: StackName
+          Value: !Ref AWS::StackName
+      SecretString:
+        Fn::Sub:
+          - >
+            {
+              "TableName": "${TableName}",
+              "BucketName": "${BucketName}"
+            }
+          - ApiURL: !GetAtt SimpleApi.Outputs.ApiURL
+
+Outputs:
+  OutputSecret:
+    Description: Output secret
+    Value: !Ref OutputSecret

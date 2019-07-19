@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: CloudFront CDN
+
+Parameters:
+  OriginUrl:
+    Type: String
+    Description: Origin URL
+
+Resources:
+
+  WebsiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub 'stack=${AWS::StackName} (${AWS::Region})'
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: "true"
+        PriceClass: PriceClass_All
+        DefaultCacheBehavior:
+          AllowedMethods: [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+          CachedMethods: [GET, HEAD]
+          Compress: false
+          DefaultTTL: 0
+          MaxTTL: 0
+          MinTTL: 0
+          ForwardedValues:
+            Cookies:
+              Forward: all
+            Headers: ['*']
+            QueryString: 'true'
+          ViewerProtocolPolicy: redirect-to-https
+          TargetOriginId: DEFAULT
+        Origins:
+          - Id: DEFAULT
+            DomainName: !Ref OriginUrl
+
+Outputs:
+  DistributionId:
+    Description: Cloudfront distribition ID
+    Value: !Ref WebsiteDistribution
+    Export:
+      Name: !Sub ${AWS::StackName}:DistributionId

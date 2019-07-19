@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Simple CRUD webservice. State is stored in a SimpleTable (DynamoDB) resource.
+
+Parameters:
+  Stage:
+    Type: String
+    Description: Stage of the enviroment
+    AllowedValues: [ sandbox, dev, test, preprod, production ]
+
+  TableName:
+    Type: String
+    Description: Name of the DDB table
+
+Globals:
+  Function:
+    Runtime: nodejs10.x
+    CodeUri: src/
+    Timeout: 5
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref TableName
+
+Resources:
+
+  GetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.get
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TableName
+      Events:
+        GetResource:
+          Type: Api
+          Properties:
+            Path: /resource/{resourceId}
+            Method: get
+
+  PutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.put
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TableName
+      Events:
+        PutResource:
+          Type: Api
+          Properties:
+            Path: /resource/{resourceId}
+            Method: put
+
+  DeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.delete
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TableName
+      Events:
+        DeleteResource:
+          Type: Api
+          Properties:
+            Path: /resource/{resourceId}
+            Method: delete
+
+Outputs:
+  ApiURL:
+    Description: "API endpoint URL for Prod environment"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/resource/"

@@ -1,0 +1,11 @@
+{
+    "name": "lambda-demo",
+    "description": "lambda demo",
+    "version": "1.0.0",
+    "main": "./snapshotManager.js",
+    "license" : "SEE LICENSE IN LICENSE.txt",
+    "files": [
+        "index.js"
+
+    ]
+}

@@ -1,0 +1,28 @@
+Version: 3
+
+Blueprints:
+
+  Default:
+    Profile: default
+
+Stages:
+
+  Pipeline:
+
+    PreReq:
+      Extends: Default
+      Order: 1
+      StackName: cfn-inj-demo-automation-prereq
+      Region: us-east-1
+      Template: stacks/continous-intergration/pre-req.template.yaml
+      Capabilities: [CAPABILITY_IAM, CAPABILITY_NAMED_IAM]
+
+    Pipeline:
+      Extends: Default
+      Order: 2
+      StackName: cfn-inj-demo-automation-pipeline
+      Region: us-east-1
+      Template: stacks/continous-intergration/codepipeline.template.yaml
+      Parameters:
+        PreReqStack: ${Pipeline.PreReq.StackName}
+        InputArtifactPrefix: input/package.zip

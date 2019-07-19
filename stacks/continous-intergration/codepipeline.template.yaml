@@ -1,0 +1,271 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Nested CloudFormation CodePipeline
+
+Parameters:
+
+  PreReqStack:
+    Description: >
+      Name of pre-requests stack, this is in same account&region of the
+      pipeline stack.
+    Type: String
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: '[a-zA-Z0-9-]+'
+    ConstraintDescription: >
+      Stack name must start with an alphabetic character and can't be longer
+      than 128 characters
+
+  InputArtifactPrefix:
+    Type: String
+    Description: S3 prefix of input code package
+    MinLength: 1
+    MaxLength: 256
+
+
+Resources:
+
+  CloudFormationBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+#      Name: !Sub cfn-build-${AWS::StackName}
+      Description: Build and package cloudfromation templates
+      ServiceRole: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:CodeBuildRoleArn"}}
+      TimeoutInMinutes: 15
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+              commands:
+                - echo Entered the install phase...
+                - apt-get install -yq make python3-pip
+                - pip3 install pipenv
+              finally:
+                - echo Leaving install phase...
+            pre_build:
+              commands:
+                - echo Entered the pre_build phase...
+                - pipenv update --dev
+                - find .
+              finally:
+                - echo Leaving pre_build phrase..
+            build:
+              commands:
+                - echo Entered the build phase...
+                - pipenv run make build
+              finally:
+                - echo Leaving build phase...
+            post_build:
+              commands:
+                - echo Entered the post_build phase...
+                - find .
+              finally:
+                - echo Leaving post_build phase...
+          artifacts:
+            files:
+              - "**/*"
+            base-directory: .
+            discard-paths: no
+
+  CloudFormationPackageProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+#      Name: !Sub cfn-build-${AWS::StackName}
+      Description: Build and package cloudfromation templates
+      ServiceRole: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:CodeBuildRoleArn"}}
+      TimeoutInMinutes: 15
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        EnvironmentVariables:
+          - Name: TEMPLATE_BUCKET
+            Value: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:ArtifactBucket"}}
+          - Name: TEMPLATE_PREFIX
+            Value: cfn-build
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+              commands:
+                - echo Entered the install phase...
+                - apt-get install -yq make python3-pip
+                - pip3 install pipenv
+              finally:
+                - echo Leaving install phase...
+            pre_build:
+              commands:
+                - echo Entered the pre_build phase...
+                - pipenv update --dev
+                - find .
+              finally:
+                - echo Leaving pre_build phrase..
+            build:
+              commands:
+                - echo Entered the build phase...
+                - pipenv run make package
+              finally:
+                - echo Leaving build phase...
+            post_build:
+              commands:
+                - echo Entered the post_build phase...
+                - find .
+              finally:
+                - echo Leaving post_build phase...
+          artifacts:
+            files:
+              - "**/*"
+            base-directory: .
+            discard-paths: no
+
+  DeployPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub cfndeploy-${AWS::StackName}
+      RoleArn: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:CodePipelineRoleArn"}}
+      ArtifactStore:
+        Type: S3
+        Location: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:ArtifactBucket"}}
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: S3Source
+              RunOrder: 1
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: S3
+              Configuration:
+                S3Bucket: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:ArtifactBucket"}}
+                S3ObjectKey: !Ref InputArtifactPrefix
+                # XXX: Polling not recommended by aws
+                PollForSourceChanges: true
+              OutputArtifacts:
+                - Name: SourceArtifact
+        - Name: Build
+          Actions:
+            - Name: SAMBuild
+              RunOrder: 1
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CloudFormationBuildProject
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: CfnBuildArtifact
+            - Name: CloudFormationPackage
+              RunOrder: 2
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CloudFormationPackageProject
+              InputArtifacts:
+                - Name: CfnBuildArtifact
+              OutputArtifacts:
+                - Name: CfnPackageArtifact
+        - Name: DeployDataTierToSandbox
+          Actions:
+            - Name: CreateChangeSet
+              RunOrder: 1
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              InputArtifacts:
+                - Name: CfnPackageArtifact
+              Configuration:
+                ChangeSetName: changeset
+                ActionMode: CHANGE_SET_REPLACE
+                StackName: cfn-inj-demo-data-tier
+                Capabilities: CAPABILITY_IAM
+                TemplatePath: CfnPackageArtifact::stacks/sample-service/data-tier/.aws-sam/build/packaged.yaml
+                ParameterOverrides: |
+                  {
+                    "Stage" : "dev"
+                  }
+                RoleArn: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:CloudFormationRoleArn"}}
+            - Name: ExecuteChangeSet
+              RunOrder: 2
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              InputArtifacts:
+                - Name: CfnPackageArtifact
+              OutputArtifacts:
+                - Name: DataTierStackOutput
+              Configuration:
+                ChangeSetName: changeset
+                ActionMode: CHANGE_SET_EXECUTE
+                StackName: cfn-inj-demo-data-tier
+#                Capabilities: CAPABILITY_IAM
+                OutputFileName: stack-output.json
+                RoleArn: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:CloudFormationRoleArn"}}
+        - Name: DeployApiTierToSandbox
+          Actions:
+            - Name: CreateChangeSet
+              RunOrder: 1
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              InputArtifacts:
+                - Name: CfnPackageArtifact
+                - Name: DataTierStackOutput
+              Configuration:
+                ChangeSetName: changeset
+                ActionMode: CHANGE_SET_REPLACE
+                StackName: cfn-inj-demo-api-tier
+                Capabilities: CAPABILITY_IAM
+                TemplatePath: CfnPackageArtifact::stacks/sample-service/simple-api/.aws-sam/build/packaged.yaml
+                ParameterOverrides: |
+                  {
+                    "Stage" : "dev",
+                    "TableName": { "Fn::GetParam" : [ "DataTierStackOutput", "stack-output.json", "TableName" ] }
+                  }
+                RoleArn: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:CloudFormationRoleArn"}}
+            - Name: ExecuteChangeSet
+              RunOrder: 2
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              InputArtifacts:
+                - Name: CfnPackageArtifact
+              OutputArtifacts:
+                - Name: ApiTierStackOutput
+              Configuration:
+                ChangeSetName: changeset
+                ActionMode: CHANGE_SET_EXECUTE
+                StackName: cfn-inj-demo-api-tier
+#                Capabilities: CAPABILITY_IAM
+                OutputFileName: stack-output.json
+                RoleArn: {"Fn::ImportValue": {"Fn::Sub": "${PreReqStack}:CloudFormationRoleArn"}}
+

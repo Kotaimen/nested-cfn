@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Data tier interface stack
+
+Parameters:
+  Stage:
+    Type: String
+    Description: Stage of the enviroment
+    AllowedValues: [ sandbox, dev, test, preprod, production ]
+
+Resources:
+
+  Table:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: Id
+        Type: String
+      SSESpecification:
+        SSEEnabled: true
+
+Outputs:
+
+  TableName:
+    Description: DDB table name
+    Value: !Ref Table
